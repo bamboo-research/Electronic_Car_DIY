@@ -1,0 +1,303 @@
+C51 COMPILER V9.56.0.0   SEND                                                              03/26/2017 13:32:23 PAGE 1   
+
+
+C51 COMPILER V9.56.0.0, COMPILATION OF MODULE SEND
+OBJECT MODULE PLACED IN Send.OBJ
+COMPILER INVOKED BY: D:\Keil_v5\C51\BIN\C51.EXE Send.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          #include "STC12C5A60S2.h" 
+   2          #include "intrins.h"
+   3          #define key1  0x1d    //黑色     刹车 Z
+   4          #define key2  0xE1    //黄色     left shift
+   5          #define key3  0x04    //红色     油门  A
+   6          #define key4  0x4f    //右       右转  →
+   7          #define key5  0x50    //左       左转  ←
+   8          sbit SCL=P0^6;      //IIC时钟引脚定义
+   9          sbit SDA=P0^7;      //IIC数据引脚定义
+  10          unsigned char idata BUF[6]; //接收数据缓存区  X轴高八位，X轴低八位； Y轴高八位，Y轴低八位； Z轴高八位，Z轴
+             -第低八位 
+  11          unsigned char idata key_buf[5]={0x00,0x00,0x00,0x00,0x00};
+  12          unsigned char code key_judge_tab[]={0x01,0x02,0x04,0x08,0x10};
+  13          void UartInit(void);
+  14          void Send();
+  15          void Clear();
+  16          void Input_Data_Process();
+  17          
+  18          void Init_ADXL345(void);             //初始化ADXL345
+  19          void  Single_Write_ADXL345(unsigned char REG_Address,unsigned char REG_data);   //单个写入数据
+  20          void  Multiple_Read_ADXL345();                                  //连续的读取内部寄存器数据
+  21          void ADXL345_Start();
+  22          void ADXL345_Stop();
+  23          void ADXL345_SendACK(bit ack);
+  24          bit  ADXL345_RecvACK();
+  25          void ADXL345_SendByte(unsigned char dat);
+  26          unsigned char ADXL345_RecvByte();
+  27          void ADXL345_Data_Process();
+  28          
+  29          void Delay5us();
+  30          void Delay5ms();
+  31          void Delay50ms();
+  32          void Delay150ms();
+  33          
+  34          signed int idata X_data; 
+  35          unsigned char Data,judge;
+  36          bit key_flag=0,flag;
+  37          
+  38          void main()
+  39          {
+  40   1          Delay150ms();
+  41   1        P0M1=0x00;
+  42   1        P0M0=0x00;
+  43   1        UartInit();
+  44   1        Init_ADXL345(); 
+  45   1        while(1)
+  46   1        { 
+  47   2          
+  48   2          Data=~P2&0x1f;         //读取按键状态
+  49   2         
+  50   2          Multiple_Read_ADXL345();     //读取ADXL345数据
+  51   2              ADXL345_Data_Process();    //ADXL345数据分析、处理
+  52   2          Input_Data_Process();    //按键数据分析、处理
+  53   2          Send();            //发送键盘代码
+  54   2          Clear();           //清空缓存数据
+C51 COMPILER V9.56.0.0   SEND                                                              03/26/2017 13:32:23 PAGE 2   
+
+  55   2          Delay50ms();  
+  56   2        }
+  57   1      }
+  58          void ADXL345_Data_Process()           
+  59          {
+  60   1        X_data=BUF[1]<<8|BUF[0];
+  61   1        if(X_data<-50)Data=Data|0x10;
+  62   1        if(X_data>50) Data=Data|0x08;
+  63   1      }
+  64          void Input_Data_Process()
+  65          {
+  66   1        unsigned char i;
+  67   1        for(i=0;i<5;i++)
+  68   1        {
+  69   2          judge=Data&key_judge_tab[i];
+  70   2          switch (judge)
+  71   2          {
+  72   3            case 0x00: break;
+  73   3            case 0x01: key_buf[0]=key1;break;
+  74   3            case 0x02: key_buf[1]=key2;break;
+  75   3            case 0x04: key_buf[2]=key3;break;
+  76   3            case 0x08: key_buf[3]=key4;break;
+  77   3            case 0x10: key_buf[4]=key5;break;
+  78   3            default:break;
+  79   3          }
+  80   2        } 
+  81   1      }
+  82          void Multiple_read_ADXL345()
+  83          {   
+  84   1        unsigned char i;
+  85   1          ADXL345_Start();                          //起始信号
+  86   1          ADXL345_SendByte(0xA6);           //发送设备地址+写信号
+  87   1          ADXL345_SendByte(0x32);                   //发送存储单元地址，从0x32开始  
+  88   1          ADXL345_Start();                          //起始信号
+  89   1          ADXL345_SendByte(0xA7);         //发送设备地址+读信号
+  90   1         for (i=0; i<6; i++)                      //连续读取6个地址数据，存储中BUF
+  91   1          {
+  92   2              BUF[i] = ADXL345_RecvByte();          //BUF[0]存储0x32地址中的数据
+  93   2              if (i == 5)ADXL345_SendACK(1);//最后一个数据需要回NOACK 
+  94   2              else ADXL345_SendACK(0); //回应ACK
+  95   2         }
+  96   1          ADXL345_Stop();                          //停止信号
+  97   1          Delay5ms();
+  98   1      }
+  99          void Init_ADXL345()
+ 100          {
+ 101   1         Single_Write_ADXL345(0x2C,0x08);   //速率设定为12.5 
+ 102   1         Single_Write_ADXL345(0x2D,0x08);   //选择电源模式   
+ 103   1         Single_Write_ADXL345(0x31,0x0B);   //测量范围,正负16g，13位模式
+ 104   1      }
+ 105          void Single_Write_ADXL345(unsigned char REG_Address,unsigned char REG_data)
+ 106          {
+ 107   1          ADXL345_Start();                  //起始信号
+ 108   1          ADXL345_SendByte(0xA6);   //发送设备地址
+ 109   1          ADXL345_SendByte(REG_Address);    //内部寄存器地址
+ 110   1          ADXL345_SendByte(REG_data);       //内部寄存器数据 
+ 111   1          ADXL345_Stop();                   //发送停止信号
+ 112   1      }
+ 113          void ADXL345_Start()
+ 114          {
+ 115   1          SDA = 1;                    //拉高数据线
+ 116   1          SCL = 1;                    //拉高时钟线
+C51 COMPILER V9.56.0.0   SEND                                                              03/26/2017 13:32:23 PAGE 3   
+
+ 117   1          Delay5us();                 //延时
+ 118   1          SDA = 0;                    //产生下降沿
+ 119   1          Delay5us();                 //延时
+ 120   1          SCL = 0;                    //拉低时钟线
+ 121   1      }
+ 122          void ADXL345_Stop()
+ 123          {
+ 124   1          SDA = 0;                    //拉低数据线
+ 125   1          SCL = 1;                    //拉高时钟线
+ 126   1          Delay5us();                 //延时
+ 127   1          SDA = 1;                    //产生上升沿
+ 128   1          Delay5us();                 //延时
+ 129   1      }
+ 130          void ADXL345_SendACK(bit ack)
+ 131          {
+ 132   1          SDA = ack;                  //写应答信号
+ 133   1          SCL = 1;                    //拉高时钟线
+ 134   1          Delay5us();                 //延时
+ 135   1          SCL = 0;                    //拉低时钟线
+ 136   1          Delay5us();                 //延时
+ 137   1      }
+ 138          bit ADXL345_RecvACK()
+ 139          {
+ 140   1          SCL = 1;                    //拉高时钟线
+ 141   1          Delay5us();                 //延时
+ 142   1          flag = SDA;                   //读应答信号
+ 143   1          SCL = 0;                    //拉低时钟线
+ 144   1          Delay5us();                 //延时
+ 145   1      
+ 146   1          return flag;
+ 147   1      }
+ 148          void ADXL345_SendByte(unsigned char dat)
+ 149          {
+ 150   1          unsigned char i;
+ 151   1      
+ 152   1          for (i=0; i<8; i++)         //8位计数器
+ 153   1          {
+ 154   2          SDA=dat&0x80;
+ 155   2              SCL = 1;                //拉高时钟线
+ 156   2              Delay5us();             //延时
+ 157   2              SCL = 0;                //拉低时钟线
+ 158   2              Delay5us();             //延时
+ 159   2          dat <<= 1;
+ 160   2          }
+ 161   1          ADXL345_RecvACK();
+ 162   1      }
+ 163          unsigned char ADXL345_RecvByte()
+ 164          {
+ 165   1          unsigned char i;
+ 166   1          unsigned char dat = 0;
+ 167   1          SDA = 1;                    //使能内部上拉,准备读取数据,
+ 168   1          for (i=0; i<8; i++)         //8位计数器
+ 169   1          {
+ 170   2              dat <<= 1;
+ 171   2              SCL = 1;                //拉高时钟线
+ 172   2              Delay5us();             //延时
+ 173   2              dat |= SDA;             //读数据               
+ 174   2              SCL = 0;                //拉低时钟线
+ 175   2              Delay5us();             //延时
+ 176   2          }
+ 177   1          return dat;
+ 178   1      }
+C51 COMPILER V9.56.0.0   SEND                                                              03/26/2017 13:32:23 PAGE 4   
+
+ 179          void Send()       
+ 180          {
+ 181   1        unsigned char i;
+ 182   1          for(i=0;i<5;i++)
+ 183   1          {
+ 184   2            SBUF=key_buf[i];
+ 185   2            while(!TI);
+ 186   2            TI=0;
+ 187   2          }
+ 188   1      }
+ 189          void Clear()
+ 190          {
+ 191   1        unsigned char i;
+ 192   1        for(i=0;i<5;i++)
+ 193   1        {
+ 194   2          key_buf[i]=0x00;
+ 195   2        }
+ 196   1      }
+ 197          
+ 198          
+ 199          void UartInit(void)   //9600bps@11.0592MHz
+ 200          {
+ 201   1        EA=1;
+ 202   1        PCON &= 0x7F;   //波特率不倍速
+ 203   1        SCON = 0x50;    //8位数据,可变波特率
+ 204   1        AUXR |= 0x04;   //独立波特率发生器时钟为Fosc,即1T
+ 205   1        BRT = 0xDC;   //设定独立波特率发生器重装值
+ 206   1        AUXR |= 0x01;   //串口1选择独立波特率发生器为波特率发生器
+ 207   1        AUXR |= 0x10;   //启动独立波特率发生器
+ 208   1      }
+ 209          
+ 210          
+ 211                              
+ 212          void Delay5us()   //@11.0592MHz
+ 213          {
+ 214   1        unsigned char i;
+ 215   1      
+ 216   1        _nop_();
+ 217   1        _nop_();
+ 218   1        _nop_();
+ 219   1        i = 10;
+ 220   1        while (--i);
+ 221   1      }
+ 222          
+ 223          void Delay5ms()   //@11.0592MHz
+ 224          {
+ 225   1        unsigned char i, j;
+ 226   1      
+ 227   1        _nop_();
+ 228   1        _nop_();
+ 229   1        i = 54;
+ 230   1        j = 198;
+ 231   1        do
+ 232   1        {
+ 233   2          while (--j);
+ 234   2        } while (--i);
+ 235   1      }
+ 236          void Delay50ms()    //@11.0592MHz
+ 237          {
+ 238   1        unsigned char i, j, k;
+ 239   1      
+ 240   1        _nop_();
+C51 COMPILER V9.56.0.0   SEND                                                              03/26/2017 13:32:23 PAGE 5   
+
+ 241   1        _nop_();
+ 242   1        i = 3;
+ 243   1        j = 26;
+ 244   1        k = 223;
+ 245   1        do
+ 246   1        {
+ 247   2          do
+ 248   2          {
+ 249   3            while (--k);
+ 250   3          } while (--j);
+ 251   2        } while (--i);
+ 252   1      }
+ 253          
+ 254          void Delay150ms()   //@11.0592MHz
+ 255          {
+ 256   1        unsigned char i, j, k;
+ 257   1      
+ 258   1        _nop_();
+ 259   1        _nop_();
+ 260   1        i = 7;
+ 261   1        j = 78;
+ 262   1        k = 167;
+ 263   1        do
+ 264   1        {
+ 265   2          do
+ 266   2          {
+ 267   3            while (--k);
+ 268   3          } while (--j);
+ 269   2        } while (--i);
+ 270   1      }
+ 271          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    498    ----
+   CONSTANT SIZE    =      5    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      2       7
+   IDATA SIZE       =     13    ----
+   BIT SIZE         =      2       1
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

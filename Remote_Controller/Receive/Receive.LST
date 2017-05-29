@@ -1,0 +1,411 @@
+C51 COMPILER V9.56.0.0   RECEIVE                                                           03/31/2017 19:59:04 PAGE 1   
+
+
+C51 COMPILER V9.56.0.0, COMPILATION OF MODULE RECEIVE
+OBJECT MODULE PLACED IN Receive.OBJ
+COMPILER INVOKED BY: D:\Keil_v5\C51\BIN\C51.EXE Receive.C OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          #include <STC12C5A60S2.h> 
+   2          #include <CH375INC.H>
+   3          
+   4          unsigned char CMD=0xff;
+   5          sbit  CH375_INT_WIRE = P3^2;      //P3.2, INT0, 连接CH375的INT#引脚,用于查询中断状态 */
+   6          unsigned char idata buf[8]={0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+   7          unsigned char idata Recbuf[6]={0x00,0x00,0x00,0x00,0x00,0x00};
+   8          unsigned char Rec_count=0; 
+   9          typedef union _REQUEST_PACK{
+  10            unsigned char  buffer[8];
+  11            struct{
+  12              unsigned char  bmReuestType;      //标准请求字
+  13              unsigned char  bRequest;        //请求代码
+  14              unsigned int     wValue;      //特性选择高
+  15              unsigned int     wIndx;       //索引
+  16              unsigned int     wLength;       //数据长度
+  17            }r;
+  18          } mREQUEST_PACKET,  *mpREQUEST_PACKET;
+  19          
+  20          //设备描述符
+  21          unsigned char  code DevDes[]={
+  22            0x12      //描述符大小      
+  23          ,   0x01      //常数DEVICE
+  24          ,   0x10      //USB规范版本信息
+  25          ,   0x01
+  26          ,   0x00      //类别码，
+  27          ,   0x00      //子类别码  
+  28          ,   0x00      //协议码
+  29          ,   0x08      //端点0的最大信息包大小
+  30          ,   0x3c      //厂商ID
+  31          ,   0x41
+  32          ,   0x03      //产品ID  
+  33          ,   0x20
+  34          ,   0x00      //设备版本信息
+  35          ,   0x02
+  36          ,   0x01      //索引值  
+  37          ,   0x02
+  38          ,   0x00
+  39          ,   0x01      //可能配置的数目  
+  40          };
+  41          //配置描述符
+  42          unsigned char   code ConDes[]={     //配置描述符
+  43                      0x09, 0x02, 0x22, 0x00, 0x01, 0x01, 0x04, 0xa0,  0x23,//配置描述符
+  44                      0x09, 0x04, 0x00, 0x00, 0x01, 0x03, 0x01, 0x01, 0x05,//接口描述符 
+  45                      0x09, 0x21, 0x10, 0x01, 0x00, 0x01, 0x22, 0x41, 0x00,//HID类描述符
+  46                      0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x18   //端点描述符，只配置了输入端点，输出端点用0端点
+  47                  };    //配置描述符
+  48          
+  49          /*报表描述符*/
+  50          unsigned char code Hid_des[]={
+  51          0x05, 0x01, 0x09, 0x06,  0xa1, 0x01, 0x05, 0x07,  0x19, 0xe0, 
+  52          0x29, 0xe7, 0x15, 0x00,  0x25, 0x01, 0x75, 0x01,  0x95, 0x08, 
+  53          0x81, 0x02, 0x95, 0x01,  0x75, 0x08, 0x81, 0x01,  0x95, 0x03, 0x75, 0x01,        
+  54          0x05, 0x08, 0x19, 0x01,  0x29, 0x03, 0x91, 0x02,  0x95, 0x01, 0x75, 0x05,  
+  55          0x91, 0x01, 0x95, 0x06,  0x75, 0x08, 0x15, 0x00,  0x26, 0xff, 0x00, 0x05,
+C51 COMPILER V9.56.0.0   RECEIVE                                                           03/31/2017 19:59:04 PAGE 2   
+
+  56          0x07, 0x19, 0x00, 0x2a,  0xff, 0x00, 0x81, 0x00,  0xc0
+  57          };
+  58          /*关于全局变量的定义*/
+  59          unsigned char mVarSetupRequest;           //  ;USB请求码
+  60          unsigned char mVarSetupLength;            //  后续数据长度
+  61          unsigned char  code * VarSetupDescr;        //描述符偏移地址
+  62          unsigned char VarUsbAddress ;           
+  63          unsigned char idata UPDATA_FLAG;
+  64          bit CH375FLAGERR;                 //错误清0
+  65          bit CH375CONFLAG;
+  66          
+  67          mREQUEST_PACKET  request;
+  68          
+  69          /*硬件定义，根据硬件修改*/
+  70          unsigned char volatile xdata CH375_CMD_PORT _at_ 0x81ff;    /* CH375命令端口的I/O地址 */
+  71          unsigned char volatile xdata CH375_DAT_PORT _at_ 0x80ff;    /* CH375数据端口的I/O地址 */
+  72          
+  73          
+  74          /* 延时2微秒,不精确 */
+  75          void Delay1us()
+  76          {
+  77   1        ;
+  78   1      }
+  79          
+  80          void  Delay2us( )
+  81          {
+  82   1        unsigned char i;
+  83   1      #define DELAY_START_VALUE 2                 /* 根据单片机的时钟选择初值,20MHz以下为0,30MHz以上为2 */
+  84   1        for ( i=DELAY_START_VALUE; i!=0; i-- );
+  85   1      }
+  86          
+  87          void Delay_ms(unsigned char ms)
+  88          {
+  89   1          unsigned char i;
+  90   1          unsigned char us;
+  91   1          for(i=0; i<ms; i++)
+  92   1          {
+  93   2              us=250;
+  94   2              while(us--);
+  95   2          }
+  96   1      }
+  97          
+  98          void CH375_WR_CMD_PORT( unsigned char cmd ) 
+  99          {          /* 向CH375的命令端口写入命令,周期不小于4uS,如果单片机较快则延时 */
+ 100   1        CH375_CMD_PORT=cmd;
+ 101   1        Delay2us( );
+ 102   1      }
+ 103          
+ 104          void CH375_WR_DAT_PORT( unsigned char dat ) 
+ 105          {          /* 向CH375的数据端口写入数据,周期不小于1.5uS,如果单片机较快则延时 */
+ 106   1        CH375_DAT_PORT=dat;
+ 107   1        Delay1us();                       /* 因为MCS51单片机较慢所以实际上无需延时 */
+ 108   1      }
+ 109          
+ 110          unsigned char CH375_RD_DAT_PORT() 
+ 111          {             /* 从CH375的数据端口读出数据,周期不小于1.5uS,如果单片机较快则延时 */
+ 112   1        Delay1us( );                      /* 因为MCS51单片机较慢所以实际上无需延时 */
+ 113   1        return( CH375_DAT_PORT );
+ 114   1      
+ 115   1      }
+ 116          /* CH375初始化子程序 */
+ 117          void  CH375_Init( )
+C51 COMPILER V9.56.0.0   RECEIVE                                                           03/31/2017 19:59:04 PAGE 3   
+
+ 118          {
+ 119   1      /* 设置USB工作模式, 必要操作 */
+ 120   1        CH375_WR_CMD_PORT( CMD_SET_USB_MODE );
+ 121   1        CH375_WR_DAT_PORT( 1 );                   /* 设置为使用内置固件的USB设备方式 */
+ 122   1        for ( ;; ) 
+ 123   1        {                       /* 等待操作成功,通常需要等待10uS-20uS */
+ 124   2          if ( CH375_RD_DAT_PORT( )==CMD_RET_SUCCESS ) break;
+ 125   2        }
+ 126   1      }
+ 127          
+ 128          //端点0数据上传
+ 129          void mCh375Ep0Up()
+ 130          {
+ 131   1        unsigned char i,len;
+ 132   1        if(mVarSetupLength)
+ 133   1        {                       //长度不为0传输具体长度的数据
+ 134   2          if(mVarSetupLength<=8)
+ 135   2          {
+ 136   3            len=mVarSetupLength;
+ 137   3            mVarSetupLength=0;
+ 138   3              } //长度小于8则长输要求的长度
+ 139   2          else
+ 140   2          {
+ 141   3            len=8;
+ 142   3            mVarSetupLength-=8;
+ 143   3          }                                         //长度大于8则传输8个，切总长度减8
+ 144   2            CH375_WR_CMD_PORT(CMD_WR_USB_DATA3);            //发出写端点0的命令
+ 145   2              CH375_WR_DAT_PORT(len);                   //写入长度
+ 146   2            for(i=0;i!=len;i++)
+ 147   2              CH375_WR_DAT_PORT(request.buffer[i]);                   //循环写入数据
+ 148   2          }
+ 149   1        else
+ 150   1        {
+ 151   2          CH375_WR_CMD_PORT(CMD_WR_USB_DATA3);            //发出写端点0的命令
+ 152   2          CH375_WR_DAT_PORT(0);                            //上传0长度数据，这是一个状态阶段
+ 153   2        }
+ 154   1      }
+ 155          
+ 156          //复制描述符以便上传
+ 157          void mCh375DesUp()
+ 158          {
+ 159   1        unsigned char k;        
+ 160   1        for (k=0; k!=8; k++ ) 
+ 161   1        {
+ 162   2               request.buffer[k]=*VarSetupDescr;                  //依次复制8个描述符，
+ 163   2               VarSetupDescr++;
+ 164   2          }
+ 165   1      }
+ 166          
+ 167          /*中断函数，但是本例用的是查询方式，只处理了输入端点1和端点0的事件，其余不处理*/
+ 168          void  mCH375Interrupt( )
+ 169          {
+ 170   1        unsigned char InterruptStatus;
+ 171   1        unsigned char length, c1, len;
+ 172   1        
+ 173   1        CH375_WR_CMD_PORT(CMD_GET_STATUS);                    /* 获取中断状态并取消中断请求 */
+ 174   1        InterruptStatus =CH375_RD_DAT_PORT();                   /* 获取中断状态 */
+ 175   1        switch(InterruptStatus){  // 分析中断状态
+ 176   2          case   USB_INT_EP1_OUT:                         //中断端点下传成功，未处理
+ 177   2            CH375_WR_CMD_PORT(CMD_RD_USB_DATA);                 //发出读数据命令
+ 178   2            if( length=CH375_RD_DAT_PORT( ) )
+ 179   2            {                   //长度为0跳出
+C51 COMPILER V9.56.0.0   RECEIVE                                                           03/31/2017 19:59:04 PAGE 4   
+
+ 180   3              for(len=0;len!=length;len++)c1=CH375_RD_DAT_PORT();         //取出下传数据
+ 181   3            }
+ 182   2            break;
+ 183   2          case   USB_INT_EP0_SETUP:                       //控制端点建立成功
+ 184   2              CH375_WR_CMD_PORT(CMD_RD_USB_DATA);
+ 185   2            length=CH375_RD_DAT_PORT();
+ 186   2            for(len=0;len!=length;len++)request.buffer[len]=CH375_RD_DAT_PORT();  // 取出数据
+ 187   2            if(length==0x08){
+ 188   3                mVarSetupLength=request.buffer[6];              //控制传输数据长度最大设置为128
+ 189   3              if((c1=request.r.bmReuestType)&0x40){                    //厂商请求，未处理
+ 190   4              }
+ 191   3              if((c1=request.r.bmReuestType)&0x20)
+ 192   3              {                   //类请求，未处理
+ 193   4                if(request.buffer[1]==0x0a)
+ 194   4                {
+ 195   5                }                       //SET_IDLE
+ 196   4                else if(request.buffer[1]==0x09)
+ 197   4                {
+ 198   5                    UPDATA_FLAG=1;
+ 199   5                }
+ 200   4              }
+ 201   3              if(!((c1=request.r.bmReuestType)&0x60))
+ 202   3              {                 //标准请求
+ 203   4                mVarSetupRequest=request.r.bRequest;              //暂存标准请求码
+ 204   4                switch(request.r.bRequest){  // 分析标准请求
+ 205   5                  case DEF_USB_CLR_FEATURE:                 //清除特性
+ 206   5                    if((c1=request.r.bmReuestType&0x1F)==0X02)
+ 207   5                    {         //不是端点不支持
+ 208   6                      switch(request.buffer[4])
+ 209   6                      {
+ 210   7                        case 0x82:
+ 211   7                          CH375_WR_CMD_PORT(CMD_SET_ENDP7);         //清除端点2上传
+ 212   7                          CH375_WR_DAT_PORT(0x8E);                      //发命令清除端点
+ 213   7                          break;
+ 214   7                        case 0x02:
+ 215   7                          CH375_WR_CMD_PORT(CMD_SET_ENDP6);
+ 216   7                          CH375_WR_DAT_PORT(0x80);              //清除端点2下传
+ 217   7                          break;
+ 218   7                        case 0x81:
+ 219   7                          CH375_WR_CMD_PORT(CMD_SET_ENDP5);         //清除端点1上传
+ 220   7                          CH375_WR_DAT_PORT(0x8E);
+ 221   7                          break;
+ 222   7                        case 0x01:
+ 223   7                          CH375_WR_CMD_PORT(CMD_SET_ENDP4);         //清除端点1下传
+ 224   7                          CH375_WR_DAT_PORT(0x80);
+ 225   7                          break;
+ 226   7                        default:
+ 227   7                          break;
+ 228   7                      }
+ 229   6                    }
+ 230   5                    else
+ 231   5                    {
+ 232   6                      CH375FLAGERR=1;                   //不支持的清除特性，置错误标志
+ 233   6                    }
+ 234   5                    break;
+ 235   5                  case DEF_USB_GET_STATUS:                //获得状态
+ 236   5                    request.buffer[0]=0;
+ 237   5                    request.buffer[1]=0;                //上传状态
+ 238   5                    break;
+ 239   5                  case DEF_USB_SET_ADDRESS:               //设置地址
+ 240   5                    VarUsbAddress=request.buffer[2];          //暂存USB主机发来的地址
+ 241   5                    break;
+C51 COMPILER V9.56.0.0   RECEIVE                                                           03/31/2017 19:59:04 PAGE 5   
+
+ 242   5                  case DEF_USB_GET_DESCR:                 //获得描述符
+ 243   5                    if(request.buffer[3]==1)              //设备描述符上传
+ 244   5                      VarSetupDescr=DevDes;
+ 245   5                    else if(request.buffer[3]==2)             //配置描述符上传
+ 246   5                      VarSetupDescr=ConDes;
+ 247   5                    else if(request.buffer[3]==0x22) 
+ 248   5                    {
+ 249   6                      VarSetupDescr=Hid_des;
+ 250   6                    }
+ 251   5                      mCh375DesUp();                      //其余描述符不支持                                  
+ 252   5                    break;
+ 253   5                  case DEF_USB_GET_CONFIG:                  //获得配置
+ 254   5                    request.buffer[0]=0;                  //没有配置则传0
+ 255   5                    if(CH375CONFLAG) request.buffer[0]=1;                 //已经配置则传1；这是在描述符里规定的
+ 256   5                    break;
+ 257   5                  case DEF_USB_SET_CONFIG:                          //设置配置
+ 258   5                    CH375CONFLAG=0;
+ 259   5                    if ( request.buffer[2] != 0 ) 
+ 260   5                    {
+ 261   6                      CH375CONFLAG=1;                     //设置配置标志                  
+ 262   6                    }
+ 263   5                    break;
+ 264   5                  case DEF_USB_GET_INTERF:                    //得到接口
+ 265   5                    request.buffer[0]=1;                  //上传接口数，本事例只支持一个接口
+ 266   5                    break;
+ 267   5                  default :
+ 268   5                    CH375FLAGERR=1;                     //不支持的标准请求
+ 269   5                    break;
+ 270   5                }
+ 271   4              }
+ 272   3            }
+ 273   2            else 
+ 274   2            {  //不支持的控制传输，不是8字节的控制传输
+ 275   3              CH375FLAGERR=1;
+ 276   3            }
+ 277   2            if(!CH375FLAGERR) mCh375Ep0Up();                    //没有错误/调用数据上传，，长度为0上传为状态
+ 278   2            else 
+ 279   2            {
+ 280   3              CH375_WR_CMD_PORT(CMD_SET_ENDP3);               //设置端点1为STALL，指示一个错误
+ 281   3              CH375_WR_DAT_PORT(0x0F);
+ 282   3            }
+ 283   2            break;
+ 284   2          case   USB_INT_EP0_IN:                          //控制端点上传成功
+ 285   2            if(mVarSetupRequest==DEF_USB_GET_DESCR)
+ 286   2            {               //描述符上传
+ 287   3              mCh375DesUp();
+ 288   3              mCh375Ep0Up();                              
+ 289   3            }
+ 290   2            else if(mVarSetupRequest==DEF_USB_SET_ADDRESS)
+ 291   2            {             //设置地址
+ 292   3              CH375_WR_CMD_PORT(CMD_SET_USB_ADDR);
+ 293   3              CH375_WR_DAT_PORT(VarUsbAddress);               //设置USB地址,设置下次事务的USB地址
+ 294   3            }
+ 295   2            CH375_WR_CMD_PORT (CMD_UNLOCK_USB);               //释放缓冲区
+ 296   2            break;
+ 297   2          case   USB_INT_EP0_OUT:                         //控制端点下传成功
+ 298   2               CH375_WR_CMD_PORT (CMD_UNLOCK_USB);  
+ 299   2            /*CH375_WR_CMD_PORT(CMD_RD_USB_DATA);                 //发出读数据命令
+ 300   2            if(length=CH375_RD_DAT_PORT())     //对本程序来说这段程序没作用，但是如果想分析主机发下来的数据的内容需要
+             -接受下来
+ 301   2            {                   //长度为0跳出
+ 302   2              for(len=0;len!=length;len++){buf[len]=CH375_RD_DAT_PORT();          //取出下传数据
+C51 COMPILER V9.56.0.0   RECEIVE                                                           03/31/2017 19:59:04 PAGE 6   
+
+ 303   2              }
+ 304   2            }*/
+ 305   2            break;
+ 306   2          default:
+ 307   2            if( (InterruptStatus&0x03)==0x03 )
+ 308   2            {                 //总线复位
+ 309   3              CH375FLAGERR=0;                         //错误清0
+ 310   3              CH375CONFLAG=0;                         //配置清0
+ 311   3              mVarSetupLength=0;                          //清配置完成输出
+ 312   3            }
+ 313   2            else
+ 314   2            {                               //命令不支持
+ 315   3              ;
+ 316   3            }
+ 317   2            CH375_WR_CMD_PORT (CMD_UNLOCK_USB);                 //释放缓冲区
+ 318   2            break;
+ 319   2        }
+ 320   1      }
+ 321          
+ 322          void UartInit(void)   //9600bps@11.0592MHz
+ 323          {
+ 324   1        EA=1;
+ 325   1        ES=1;
+ 326   1        SCON = 0x50;    //8位数据,可变波特率
+ 327   1        TMOD &= 0x0F;   //清除定时器1模式位
+ 328   1        TMOD |= 0x20;   //设定定时器1为8位自动重装方式
+ 329   1        TL1 = 0xFD;   //设定定时初值
+ 330   1        TH1 = 0xFD;   //设定定时器重装值
+ 331   1        ET1 = 0;    //禁止定时器1中断
+ 332   1        TR1 = 1;    //启动定时器1
+ 333   1      }
+ 334          
+ 335          main( ) 
+ 336          {
+ 337   1        unsigned char i;
+ 338   1        Delay_ms(300);  
+ 339   1        CH375_Init( );  /* 初始化CH376 */
+ 340   1        UartInit();   
+ 341   1      
+ 342   1        while(1)
+ 343   1        {   
+ 344   2      
+ 345   2          if(CH375_INT_WIRE == 0)
+ 346   2          {
+ 347   3            mCH375Interrupt( );
+ 348   3            
+ 349   3            if(UPDATA_FLAG==0x01)
+ 350   3            {   
+ 351   4              ES=0;
+ 352   4              for(i=0;i!=8;i++)buf[i+2]=Recbuf[i];    //将接收到的数据赋值给数组buf
+ 353   4              CH375_WR_CMD_PORT(CMD_WR_USB_DATA5);  
+ 354   4              CH375_WR_DAT_PORT(8);
+ 355   4              for(i=0;i!=8;i++)CH375_WR_DAT_PORT(buf[i]); //将接buf内的数据发送到USB
+ 356   4              ES=1;         
+ 357   4            }
+ 358   3          }
+ 359   2        }
+ 360   1      
+ 361   1      }
+ 362          void uart_receive(void) interrupt 4
+ 363          {
+ 364   1        unsigned char ch;
+C51 COMPILER V9.56.0.0   RECEIVE                                                           03/31/2017 19:59:04 PAGE 7   
+
+ 365   1        ES=0;
+ 366   1        if(RI)
+ 367   1        {
+ 368   2          ch=SBUF;
+ 369   2          Recbuf[Rec_count]=ch;     
+ 370   2          Rec_count++;          
+ 371   2          if(Rec_count>4)Rec_count=0;
+ 372   2        }
+ 373   1        RI=0;
+ 374   1        ES=1;
+ 375   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    696    ----
+   CONSTANT SIZE    =    117    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     15       1
+   IDATA SIZE       =     15    ----
+   BIT SIZE         =      2    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
