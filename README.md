@@ -6,11 +6,21 @@ A small project for Digital Circuit Course
 ## Hardware
 
  - Remote controller based on MCU `STC12C5A60S2`, triaxial accelerometer `ADXL345` and bluetooth 2.0 module `HC-05`
- - Raspberry Pi 3 Model B
+ - Car chassis and wheels
+ - `Raspberry Pi 3` Model B
+   - Pi Camera
  - Cradle head made with `two` `SG90` servo
  - `Two` Dual Full-Bridge Motor Drivers `L298N`
  - `Four` 12-V stepping motors
  - Adafruit 16-Channel 12-bit PWM/Servo Driver `PCA9685`
+ - Wireless Network / WIFI
+ 
+## Tools
+
+ - USB to TTL Transformer
+ - Dupont Lines
+ - 5V power to suppoert `Raspberry Pi`, remote controller, `PCA9685` and cradle servos
+ - 12V power to suppoert wheel motors
  
 ## Functions Implemented
 
