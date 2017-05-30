@@ -35,7 +35,7 @@ class face_tracking:
         if self.condition:
             self.ps.terminate()
         else:
-            self.ps = subprocess.Popen('python MultiFace.py',shell=True)
+            self.ps = subprocess.Popen('python face_track.py',shell=True)
 
 
 def control_motor(servo_ins):
