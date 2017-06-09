@@ -19,8 +19,8 @@ A small project for Digital Circuit Course
 
  - USB to TTL Transformer
  - Dupont Lines
- - 5V power to suppoert `Raspberry Pi`, remote controller, `PCA9685` and cradle servos
- - 12V power to suppoert wheel motors
+ - 5V power to support `Raspberry Pi`, remote controller, `PCA9685` and cradle servos
+ - 12V power to support wheel motors
  
 ## Functions Implemented
 
